@@ -2,8 +2,8 @@ name: run-bot
 
 on:
   schedule:
-    - cron: '0 8 * * *'  # اجرای خودکار هر روز ساعت ۸ صبح UTC
-  workflow_dispatch:     # امکان اجرای دستی
+    - cron: '0 8 * * *'  # هر روز ساعت 8 صبح اجرا می‌شود
+  workflow_dispatch:
 
 jobs:
   build:
@@ -23,6 +23,5 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    - name: Run the bot script
-      run: |
-        python main.py
+    - name: Run script
+      run: python main.py
