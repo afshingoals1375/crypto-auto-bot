@@ -1,0 +1,4 @@
+ccxt
+matplotlib
+pandas
+python-telegram-bot
