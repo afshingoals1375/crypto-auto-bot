@@ -1,16 +1,16 @@
-name: KuCoin Analyzer Bot
+name: Crypto Auto Bot
 
 on:
   schedule:
-    - cron: '*/30 * * * *'  # هر ۳۰ دقیقه اجرا شود
-  workflow_dispatch:
+    - cron: '*/15 * * * *'  # اجرا هر ۱۵ دقیقه
+  workflow_dispatch:       # امکان اجرای دستی هم دارد
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout repo
+    - name: Checkout code
       uses: actions/checkout@v3
 
     - name: Set up Python
@@ -20,10 +20,10 @@ jobs:
 
     - name: Install dependencies
       run: |
-        pip install ccxt pandas mplfinance requests matplotlib
+        pip install -r requirements.txt
 
-    - name: Run main script
+    - name: Run crypto analysis bot
       env:
         TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-        CHAT_ID: ${{ secrets.CHAT_ID }}
+        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       run: python main.py
