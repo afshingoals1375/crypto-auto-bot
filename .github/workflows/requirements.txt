@@ -1,4 +1,5 @@
 ccxt
-matplotlib
 pandas
-python-telegram-bot
+numpy
+mplfinance
+requests
