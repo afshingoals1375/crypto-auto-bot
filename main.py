@@ -1,93 +1,76 @@
 import ccxt
 import pandas as pd
-import numpy as np
-import requests
-import mplfinance as mpf
-from io import BytesIO
+import telegram
+import json
+import os
 
-# تنظیمات
-TOKEN = "7881646413:AAF0xarvW2kfenlyvO-qalInehTCfH2F03w"
-CHAT_ID = "720745494"
-TIMEFRAME = "4h"
-LIMIT = 150
-THRESHOLD_PERCENT = 2.0
+# اطلاعات تلگرام
+TOKEN = '7881646413:AAF0xarvW2kfenlyvO-qalInehTCfH2F03w'
+CHAT_ID = '720745494'
 
-def send_telegram_chart(df, symbol, level_type, level_price):
-    buf = BytesIO()
-    df = df.set_index('Date')
-    addplot = [mpf.make_addplot([level_price]*len(df), color='g' if level_type == 'حمایت' else 'r')]
-    mpf.plot(df, type='candle', style='charles', addplot=addplot, volume=True, savefig=buf)
-    buf.seek(0)
+# محدوده نزدیکی به سطح
+THRESHOLD = 0.003
 
-    tv_symbol = symbol.replace("/", "")  # مثل BTCUSDT
-    tv_link = f"https://www.tradingview.com/chart/?symbol=BINANCE:{tv_symbol}"
+# فایل هشدارهای قبلی
+ALERTS_FILE = 'alerts.json'
+if not os.path.exists(ALERTS_FILE):
+    with open(ALERTS_FILE, 'w') as f:
+        json.dump({}, f)
 
-    caption = f"""
-🚨 هشدار تکنیکال!
-🪙 ارز: {symbol}
-⏰ تایم‌فریم: 4h
-📌 ناحیه: {level_type} ({round(level_price, 2)})
+exchange = ccxt.kucoin()
 
-🔗 [مشاهده در تریدینگ‌ویو]({tv_link})
-"""
+def get_ohlcv(symbol='BTC/USDT', timeframe='4h', limit=200):
+    ohlcv = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
+    df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+    df.set_index('timestamp', inplace=True)
+    return df
 
-    url = f"https://api.telegram.org/bot{TOKEN}/sendPhoto"
-    files = {'photo': buf}
-    data = {
-        'chat_id': CHAT_ID,
-        'caption': caption,
-        'parse_mode': 'Markdown'
-    }
-    requests.post(url, files=files, data=data)
+def find_support_resistance(df, window=2):
+    supports, resistances = [], []
+    for i in range(window, len(df)-window):
+        low = df['low']
+        high = df['high']
+        if all(low[i] < low[i - j] and low[i] < low[i + j] for j in range(1, window+1)):
+            supports.append(round(low[i], 2))
+        if all(high[i] > high[i - j] and high[i] > high[i + j] for j in range(1, window+1)):
+            resistances.append(round(high[i], 2))
+    return list(set(supports))[-3:], list(set(resistances))[-3:]
 
-def get_swing_levels(df):
-    highs = df['High']
-    lows = df['Low']
-    resistance = highs[(highs.shift(1) < highs) & (highs.shift(-1) < highs)]
-    support = lows[(lows.shift(1) > lows) & (lows.shift(-1) > lows)]
-    return support.dropna().values[-3:], resistance.dropna().values[-3:]
+def get_current_price(symbol='BTC/USDT'):
+    ticker = exchange.fetch_ticker(symbol)
+    return ticker['last']
 
-def is_near_level(price, level, threshold_percent):
-    threshold = level * (threshold_percent / 100)
-    return abs(price - level) <= threshold
+def send_telegram_alert(message):
+    bot = telegram.Bot(token=TOKEN)
+    bot.send_message(chat_id=CHAT_ID, text=message)
 
-def analyze_pair(symbol):
-    try:
-        ohlcv = exchange.fetch_ohlcv(symbol, timeframe=TIMEFRAME, limit=LIMIT)
-        df = pd.DataFrame(ohlcv, columns=['Timestamp','Open','High','Low','Close','Volume'])
-        df['Date'] = pd.to_datetime(df['Timestamp'], unit='ms')
-        support_levels, resistance_levels = get_swing_levels(df)
-        current_price = df['Close'].iloc[-1]
+def load_alerts():
+    with open(ALERTS_FILE, 'r') as f:
+        return json.load(f)
 
-        for level in support_levels:
-            if is_near_level(current_price, level, THRESHOLD_PERCENT):
-                send_telegram_chart(df.copy(), symbol, "حمایت", level)
-                break
+def save_alerts(alerts):
+    with open(ALERTS_FILE, 'w') as f:
+        json.dump(alerts, f)
 
-        for level in resistance_levels:
-            if is_near_level(current_price, level, THRESHOLD_PERCENT):
-                send_telegram_chart(df.copy(), symbol, "مقاومت", level)
-                break
+def main():
+    symbol = 'BTC/USDT'
+    df = get_ohlcv(symbol)
+    supports, resistances = find_support_resistance(df)
+    price = get_current_price(symbol)
+    alerts = load_alerts()
+    if symbol not in alerts:
+        alerts[symbol] = []
 
-    except Exception as e:
-        print(f"❌ خطا در {symbol}: {e}")
+    for level in supports + resistances:
+        diff = abs(price - level) / price
+        if diff < THRESHOLD and str(level) not in alerts[symbol]:
+            level_type = 'حمایت' if level in supports else 'مقاومت'
+            message = f"🚨 هشدار {level_type} در {symbol}\nقیمت فعلی: {price}\nنزدیک به سطح {level}"
+            send_telegram_alert(message)
+            alerts[symbol].append(str(level))
 
-# اجرای برنامه
-exchange = ccxt.kucoin()  # از کوکوین استفاده می‌کنیم چون محدودیت آی‌پی نداره
-markets = exchange.load_markets()
-symbols = [s for s in markets if "/USDT" in s and markets[s]['active']]
+    save_alerts(alerts)
 
-volatile_pairs = []
-for symbol in symbols:
-    try:
-        ticker = exchange.fetch_ticker(symbol)
-        volume = ticker.get('baseVolume', 0)
-        atr = ticker.get('high', 0) - ticker.get('low', 0)
-        score = volume * atr
-        volatile_pairs.append((symbol, score))
-    except:
-        continue
-
-top_pairs = sorted(volatile_pairs, key=lambda x: x[1], reverse=True)[:10]
-for sym, _ in top_pairs:
-    analyze_pair(sym)
+if __name__ == '__main__':
+    main()
